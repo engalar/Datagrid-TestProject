@@ -9,20 +9,31 @@ import "mx-global";
 import { Big } from "big.js";
 
 // BEGIN EXTRA CODE
-function monitor(inputEle, guid) {
-	// monitor inputEle dom changes
-	MutationObserver.observe(inputEle, {
-		attributes: true,
-		attributeFilter: ["value"],
-		attributeOldValue: true,
-		attributeFilter: ["value"],
-		attributeOldValue: true
-	}, function (mutations) {
-		if (mutations) {
-			// mx.data.saveDocument(guid, 'file name', null, inputEle.files[0]);
-			console.log("save document", guid, 'file name', null, inputEle.files[0]);
+function monitor(inputEle, cb) {
+	if (inputEle == null) {
+		console.error("monitor: inputEle is null");
+		return;
+	}
+
+	if (cb == null) {
+		console.error("monitor: cb is null");
+		return;
+	}
+
+	try {
+		const observe = new MutationObserver(cb);
+		observe.observe(inputEle, {
+			attributes: true,
+			childList: true,
+			characterData: true,
+			attributeOldValue: true
+		});
+		return () => {
+			observe.disconnect();
 		}
-	});
+	} catch (e) {
+		console.error("monitor: error while setting up MutationObserver", e);
+	}
 }
 // END EXTRA CODE
 
@@ -34,10 +45,34 @@ export async function JavaScript_action(fileToUpload) {
 	// BEGIN USER CODE
 	const guid = fileToUpload.getGuid();
 	const containerEle = document.querySelector('.id-' + fileToUpload.get('_id').toNumber());
-	if (containerEle) {
+	if (containerEle && !containerEle.classList.contains('monitoring')) {
+		// prevent all img in the container emit onload event and pop to parent node
+		const imgs = containerEle.querySelectorAll('img');
+		imgs.forEach((img) => {
+			img.onload = null;
+		});
+		// mark as monitoring, prevent multiple monitoring
+		containerEle.classList.add('monitoring');
+		console.log('onload', containerEle);
 		const inputEle = containerEle.querySelector('.mx-fileinput .sr-only input');
-	
-		monitor(inputEle, guid);
+		const dummyInputEle = containerEle.querySelector('.mx-fileinput .form-control');
+
+		// monitor file input changes, later upload to server
+		const disposer = monitor(dummyInputEle, (mutations) => {
+			if (mutations) {
+				if (inputEle.files == null || inputEle.files.length === 0) {
+					console.error("monitor: inputEle.files is null or empty");
+					return;
+				}
+				try {
+					const fileBlob = inputEle.files[0];
+					mx.data.saveDocument(guid, fileBlob.name, null, fileBlob);
+					console.log("save document", guid, fileBlob.name, null, fileBlob);
+				} catch (e) {
+					console.error("monitor: error while saving document", e);
+				}
+			}
+		});
 	}
 	// END USER CODE
 }
